@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: flashcart
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flashcart-config
+  namespace: flashcart
+data:
+  DATABASE_URL: postgres://flashcart:flashcart@postgres:5432/flashcart?sslmode=disable
+  REDIS_ADDR: redis:6379
+  KAFKA_BROKERS: kafka:9092
+  PAYMENT_FAILURE_RATE: "0.10"
+  PORT: "8080"
+  CORS_ORIGIN: "https://your-frontend.example.com"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: flashcart-secrets
+  namespace: flashcart
+type: Opaque
+stringData:
+  JWT_SECRET: change-me-in-production
+  RAZORPAY_KEY_ID: rzp_test_replace_me
+  RAZORPAY_KEY_SECRET: replace_me
+  RAZORPAY_WEBHOOK_SECRET: replace_me

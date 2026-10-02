@@ -1,0 +1,203 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flashcart
+      POSTGRES_PASSWORD: flashcart
+      POSTGRES_DB: flashcart
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flashcart"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redpanda is a single-binary, Kafka-API-compatible broker — no
+  # Zookeeper, no separate controller process. Any real Kafka cluster
+  # (or Confluent/MSK) is a drop-in replacement; only KAFKA_BROKERS changes.
+  kafka:
+    image: redpandadata/redpanda:v24.1.1
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=512M
+      - --overprovisioned
+      - --node-id=0
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://kafka:9092
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      args:
+        CMD_PATH: ./cmd/api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://flashcart:flashcart@postgres:5432/flashcart?sslmode=disable"
+      REDIS_ADDR: "redis:6379"
+      JWT_SECRET: "dev-secret-change-me"
+      KAFKA_BROKERS: "kafka:9092"
+      ADMIN_EMAIL: "admin@flashcart.local"
+      ADMIN_PASSWORD: "Admin@12345"
+      CORS_ORIGIN: "*"
+      RAZORPAY_KEY_ID: "${RAZORPAY_KEY_ID:-}"
+      RAZORPAY_KEY_SECRET: "${RAZORPAY_KEY_SECRET:-}"
+      RAZORPAY_WEBHOOK_SECRET: "${RAZORPAY_WEBHOOK_SECRET:-}"
+      TWILIO_ACCOUNT_SID: "${TWILIO_ACCOUNT_SID:-}"
+      TWILIO_AUTH_TOKEN: "${TWILIO_AUTH_TOKEN:-}"
+      TWILIO_FROM_NUMBER: "${TWILIO_FROM_NUMBER:-}"
+      TWILIO_MESSAGING_SERVICE_SID: "${TWILIO_MESSAGING_SERVICE_SID:-}"
+      TWILIO_DEFAULT_COUNTRY_CODE: "${TWILIO_DEFAULT_COUNTRY_CODE:-+91}"
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      GROQ_MODEL: "${GROQ_MODEL:-openai/gpt-oss-120b}"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # Run `docker compose up --scale orderworker=5` to see Kafka
+  # consumer-group rebalancing spread order.created across replicas —
+  # the "Order Workers: 10 -> 100" scaling story from the architecture.
+  orderworker:
+    build:
+      context: .
+      args:
+        CMD_PATH: ./cmd/orderworker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgres://flashcart:flashcart@postgres:5432/flashcart?sslmode=disable"
+      REDIS_ADDR: "redis:6379"
+      KAFKA_BROKERS: "kafka:9092"
+      PAYMENT_FAILURE_RATE: "0.1"
+
+  festivalworker:
+    build:
+      context: .
+      args:
+        CMD_PATH: ./cmd/festivalworker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgres://flashcart:flashcart@postgres:5432/flashcart?sslmode=disable"
+      REDIS_ADDR: "redis:6379"
+      KAFKA_BROKERS: "kafka:9092"
+      HOLIDAY_CALENDAR_URL: "${HOLIDAY_CALENDAR_URL:-https://calendarific.com/api/v2}"
+      HOLIDAY_CALENDAR_PROVIDER: "${HOLIDAY_CALENDAR_PROVIDER:-calendarific}"
+      CALENDARIFIC_API_KEY: "${CALENDARIFIC_API_KEY:-}"
+      HOLIDAY_COUNTRY_CODE: "${HOLIDAY_COUNTRY_CODE:-IN}"
+      FESTIVAL_TIMEZONE: "${FESTIVAL_TIMEZONE:-Asia/Kolkata}"
+      FESTIVAL_DISCOUNT_PERCENT: "${FESTIVAL_DISCOUNT_PERCENT:-10}"
+      FESTIVAL_STOCK_PER_PRODUCT: "${FESTIVAL_STOCK_PER_PRODUCT:-10}"
+      FESTIVAL_PRODUCTS_PER_EVENT: "${FESTIVAL_PRODUCTS_PER_EVENT:-20}"
+
+  notificationworker:
+    build:
+      context: .
+      args:
+        CMD_PATH: ./cmd/notificationworker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgres://flashcart:flashcart@postgres:5432/flashcart?sslmode=disable"
+      KAFKA_BROKERS: "kafka:9092"
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+      TWILIO_ACCOUNT_SID: "${TWILIO_ACCOUNT_SID:-}"
+      TWILIO_AUTH_TOKEN: "${TWILIO_AUTH_TOKEN:-}"
+      TWILIO_FROM_NUMBER: "${TWILIO_FROM_NUMBER:-}"
+      TWILIO_MESSAGING_SERVICE_SID: "${TWILIO_MESSAGING_SERVICE_SID:-}"
+      TWILIO_DEFAULT_COUNTRY_CODE: "${TWILIO_DEFAULT_COUNTRY_CODE:-+91}"
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
+      VAPID_SUBJECT: "${VAPID_SUBJECT:-mailto:admin@flashcart.local}"
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    depends_on:
+      - api
+      - orderworker
+      - notificationworker
+      - festivalworker
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9091:9090"
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

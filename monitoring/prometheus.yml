@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: flashcart-api
+    static_configs:
+      - targets: ["api:9090"]
+  - job_name: flashcart-orderworker
+    static_configs:
+      - targets: ["orderworker:9090"]
+  - job_name: flashcart-notificationworker
+    static_configs:
+      - targets: ["notificationworker:9090"]
+  - job_name: flashcart-festivalworker
+    static_configs:
+      - targets: ["festivalworker:9090"]

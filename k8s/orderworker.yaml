@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flashcart-orderworker
+  namespace: flashcart
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: flashcart-orderworker }
+  template:
+    metadata:
+      labels: { app: flashcart-orderworker }
+    spec:
+      containers:
+        - name: orderworker
+          image: YOUR_REGISTRY/flashcart-orderworker:latest
+          ports:
+            - containerPort: 9090
+          envFrom:
+            - configMapRef: { name: flashcart-config }
+            - secretRef: { name: flashcart-secrets }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 1000m, memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flashcart-orderworker
+  namespace: flashcart
+spec:
+  selector: { app: flashcart-orderworker }
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: flashcart-orderworker
+  namespace: flashcart
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: flashcart-orderworker
+  minReplicas: 3
+  maxReplicas: 50
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 60 }

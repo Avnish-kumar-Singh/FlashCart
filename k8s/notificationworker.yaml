@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flashcart-notificationworker
+  namespace: flashcart
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: flashcart-notificationworker }
+  template:
+    metadata:
+      labels: { app: flashcart-notificationworker }
+    spec:
+      containers:
+        - name: notificationworker
+          image: YOUR_REGISTRY/flashcart-notificationworker:latest
+          ports:
+            - containerPort: 9090
+          envFrom:
+            - configMapRef: { name: flashcart-config }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 300m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flashcart-notificationworker
+  namespace: flashcart
+spec:
+  selector: { app: flashcart-notificationworker }
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: flashcart-notificationworker
+  namespace: flashcart
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: flashcart-notificationworker
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 65 }
